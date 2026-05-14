@@ -1,234 +1,170 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import joblib
 
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    classification_report,
+    confusion_matrix,
+    precision_score,
+    recall_score,
+    f1_score,
+    roc_auc_score
+)
 
-# ======================================
+from imblearn.over_sampling import SMOTE
+
+# =========================================
 # PAGE CONFIG
-# ======================================
+# =========================================
 
 st.set_page_config(
-    page_title="Movie Rating Predictor",
-    page_icon="🎬",
+    page_title="Fraud Detection System",
+    page_icon="💳",
     layout="centered"
 )
 
-st.title("🎬 Movie Rating Prediction System")
-st.write("Predict IMDb movie ratings using Machine Learning")
+st.title("💳 Credit Card Fraud Detection System")
 
-# ======================================
+# =========================================
 # LOAD DATA
-# ======================================
+# =========================================
 
 @st.cache_data
 def load_data():
-    df = pd.read_csv("IMDb Movies India.csv", encoding="latin1")
+    df = pd.read_csv("creditcard.csv")
     return df
 
-try:
-    df = load_data()
-    st.success("Dataset Loaded Successfully!")
-except Exception as e:
-    st.error(f"Error Loading CSV: {e}")
-    st.stop()
+df = load_data()
 
-# ======================================
-# CLEAN COLUMN NAMES
-# ======================================
+st.success("Dataset Loaded Successfully!")
 
-df.columns = df.columns.str.strip()
-
-# ======================================
-# KEEP IMPORTANT COLUMNS
-# ======================================
-
-required_columns = [
-    "Genre",
-    "Director",
-    "Actor 1",
-    "Duration",
-    "Votes",
-    "Rating"
-]
-
-df = df[required_columns]
-
-# ======================================
-# REMOVE NULL VALUES
-# ======================================
-
-df.dropna(inplace=True)
-
-# ======================================
-# CLEAN DURATION
-# ======================================
-
-df["Duration"] = (
-    df["Duration"]
-    .astype(str)
-    .str.replace(" min", "", regex=False)
-)
-
-df["Duration"] = pd.to_numeric(
-    df["Duration"],
-    errors="coerce"
-)
-
-# ======================================
-# CLEAN VOTES
-# ======================================
-
-df["Votes"] = (
-    df["Votes"]
-    .astype(str)
-    .str.replace(",", "", regex=False)
-)
-
-df["Votes"] = pd.to_numeric(
-    df["Votes"],
-    errors="coerce"
-)
-
-# ======================================
-# CLEAN RATING
-# ======================================
-
-df["Rating"] = pd.to_numeric(
-    df["Rating"],
-    errors="coerce"
-)
-
-# Remove invalid rows again
-
-df.dropna(inplace=True)
-
-# ======================================
-# ENCODE CATEGORICAL DATA
-# ======================================
-
-genre_encoder = LabelEncoder()
-director_encoder = LabelEncoder()
-actor_encoder = LabelEncoder()
-
-df["Genre"] = genre_encoder.fit_transform(df["Genre"])
-df["Director"] = director_encoder.fit_transform(df["Director"])
-df["Actor 1"] = actor_encoder.fit_transform(df["Actor 1"])
-
-# ======================================
-# FEATURES & TARGET
-# ======================================
-
-X = df.drop("Rating", axis=1)
-y = df["Rating"]
-
-# ======================================
-# SPLIT DATA
-# ======================================
-
-X_train, X_test, y_train, y_test = train_test_split(
-    X,
-    y,
-    test_size=0.2,
-    random_state=42
-)
-
-# ======================================
+# =========================================
 # TRAIN MODEL
-# ======================================
+# =========================================
 
-model = RandomForestRegressor(
-    n_estimators=100,
-    random_state=42
-)
+@st.cache_resource
+def train_model():
 
-model.fit(X_train, y_train)
+    X = df.drop("Class", axis=1)
+    y = df["Class"]
 
-# ======================================
-# EVALUATE MODEL
-# ======================================
+    scaler = StandardScaler()
 
-predictions = model.predict(X_test)
+    X["Amount"] = scaler.fit_transform(
+        X["Amount"].values.reshape(-1, 1)
+    )
 
-mae = mean_absolute_error(y_test, predictions)
-r2 = r2_score(y_test, predictions)
+    X["Time"] = scaler.fit_transform(
+        X["Time"].values.reshape(-1, 1)
+    )
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        random_state=42,
+        stratify=y
+    )
+
+    smote = SMOTE(random_state=42)
+
+    X_train_smote, y_train_smote = smote.fit_resample(
+        X_train,
+        y_train
+    )
+
+    model = RandomForestClassifier(
+        n_estimators=200,
+        max_depth=10,
+        random_state=42,
+        n_jobs=-1
+    )
+
+    model.fit(X_train_smote, y_train_smote)
+
+    y_pred = model.predict(X_test)
+    y_prob = model.predict_proba(X_test)[:, 1]
+
+    precision = precision_score(y_test, y_pred)
+    recall = recall_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
+    roc_auc = roc_auc_score(y_test, y_prob)
+
+    return model, precision, recall, f1, roc_auc
+
+# =========================================
+# RUN TRAINING
+# =========================================
+
+with st.spinner("Training ML Model..."):
+
+    model, precision, recall, f1, roc_auc = train_model()
+
+st.success("Model Trained Successfully!")
+
+# =========================================
+# SHOW METRICS
+# =========================================
 
 st.subheader("📊 Model Performance")
 
-st.write(f"Mean Absolute Error: {mae:.2f}")
-st.write(f"R² Score: {r2:.2f}")
+st.write(f"Precision: {precision:.4f}")
+st.write(f"Recall: {recall:.4f}")
+st.write(f"F1 Score: {f1:.4f}")
+st.write(f"ROC-AUC: {roc_auc:.4f}")
 
-# ======================================
-# USER INPUTS
-# ======================================
+# =========================================
+# INPUT SECTION
+# =========================================
 
-st.subheader("🎥 Predict Movie Rating")
+st.subheader("💳 Enter Transaction Details")
 
-genre_input = st.selectbox(
-    "Select Genre",
-    genre_encoder.classes_
-)
+Time = st.number_input("Time", value=0.0)
+Amount = st.number_input("Amount", value=0.0)
 
-director_input = st.selectbox(
-    "Select Director",
-    director_encoder.classes_[:500]
-)
+features = []
 
-actor_input = st.selectbox(
-    "Select Main Actor",
-    actor_encoder.classes_[:500]
-)
+for i in range(1, 29):
+    val = st.number_input(f"V{i}", value=0.0)
+    features.append(val)
 
-duration_input = st.slider(
-    "Movie Duration",
-    60,
-    240,
-    120
-)
-
-votes_input = st.slider(
-    "Votes",
-    0,
-    100000,
-    5000
-)
-
-# ======================================
+# =========================================
 # PREDICTION
-# ======================================
+# =========================================
 
-if st.button("Predict Rating"):
-
-    genre_encoded = genre_encoder.transform([genre_input])[0]
-    director_encoded = director_encoder.transform([director_input])[0]
-    actor_encoded = actor_encoder.transform([actor_input])[0]
+if st.button("Predict Transaction"):
 
     input_data = pd.DataFrame([[
-        genre_encoded,
-        director_encoded,
-        actor_encoded,
-        duration_input,
-        votes_input
-    ]], columns=X.columns)
+        Time,
+        *features,
+        Amount
+    ]], columns=[
+        'Time',
+        'V1', 'V2', 'V3', 'V4', 'V5',
+        'V6', 'V7', 'V8', 'V9', 'V10',
+        'V11', 'V12', 'V13', 'V14',
+        'V15', 'V16', 'V17', 'V18',
+        'V19', 'V20', 'V21', 'V22',
+        'V23', 'V24', 'V25', 'V26',
+        'V27', 'V28',
+        'Amount'
+    ])
 
-    prediction = model.predict(input_data)[0]
+    prediction = model.predict(input_data)
 
-    st.success(f"⭐ Predicted IMDb Rating: {prediction:.1f}/10")
-
-    if prediction >= 8:
-        st.balloons()
-        st.write("🔥 Potential Blockbuster")
-    elif prediction >= 6:
-        st.write("🎬 Likely Well Received")
+    if prediction[0] == 1:
+        st.error("⚠️ Fraudulent Transaction Detected")
     else:
-        st.write("🍿 Mixed Audience Response")
+        st.success("✅ Genuine Transaction")
 
-# ======================================
+# =========================================
 # DATA PREVIEW
-# ======================================
+# =========================================
 
 st.subheader("📁 Dataset Preview")
 
